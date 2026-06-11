@@ -48,7 +48,37 @@
 └──────────────┘ └──────────────┘         └──────────────┘
 ```
 
-### 三种执行模式对比
+### 加入 Nginx 接入层的完整架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Controller (调度机)                          │
+│  dispatch.sh ──────────────────────────────────────────────────┐│
+│  heartbeat.sh                                                   ││
+└────────────────────────────────────────────────────────────────┘│
+                                                                   │
+                     HTTPS :443 (TLS)                              │
+              ┌──────────┴──────────┐                              │
+              │   Nginx 接入层       │  ← 限流 / TLS / 负载均衡    │
+              │   - rate limiting   │                              │
+              │   - connection QoS  │                              │
+              │   - health check    │                              │
+              │   - access log      │                              │
+              └──────┬──┬──┬────────┘                              │
+                     │  │  │                                       │
+           ┌─────────┘  │  └──────────┐                            │
+           ▼            ▼              ▼                           │
+    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
+    │ 部署机 A      │ │ 部署机 B      │ │ 部署机 C      │           │
+    │ (Linux)      │ │ (Windows)    │ │ (Linux)      │            │
+    │              │ │              │ │              │            │
+    │ opencode     │ │ opencode     │ │ opencode     │            │
+    │ serve :4096  │ │ serve :4096  │ │ serve :4096  │            │
+    │ systemd      │ │ NSSM/schtask │ │ systemd      │            │
+    └──────────────┘ └──────────────┘ └──────────────┘            │
+```
+
+### 执行模式对比
 
 | 模式 | 命令 | 适用场景 | Session ID 获取 |
 |------|------|----------|-----------------|
@@ -424,6 +454,53 @@ Controller (100.64.0.1) ── Tailscale mesh ──▶ Deploy-A (100.64.0.2)
 # 无需暴露公网端口
 curl -u "agent:$PASSWORD" http://100.64.0.2:4096/session
 ```
+
+### 4.7 Nginx 接入层（并发控制 + 限流 + TLS）
+
+`opencode serve` 自身无内置限流或 TLS。生产环境推荐在每个部署机（或一组部署机）前面放置 nginx：
+
+```nginx
+# 核心能力
+limit_req_zone  zone=opencode_req    rate=10r/m;   # 请求限流
+limit_conn_zone zone=opencode_conn   3 per IP;      # 并发限制
+proxy_buffering off;                                # SSE 流式支持
+proxy_read_timeout 600s;                            # AI 长任务超时
+keepalive 32;                                       # 连接复用
+
+upstream opencode_backend {
+    least_conn;
+    server 127.0.0.1:4096 max_fails=3 fail_timeout=30s;
+    server 127.0.0.1:4097 max_fails=3 fail_timeout=30s;
+}
+```
+
+完整配置见 [nginx/opencode-upstream.conf](nginx/opencode-upstream.conf) 和 [nginx/README.md](nginx/README.md)。
+
+**关键决策：共享 nginx vs 每机 nginx**
+
+```
+方案 A: 中心化 nginx (多机共享)     方案 B: 每机独立 nginx
+┌─────────────────────┐          ┌─────────────────────┐
+│ Nginx               │          │ Machine A            │
+│ upstream {           │          │ ┌─ nginx ─┐         │
+│   A:4096, B:4096... │          │ │ TLS+限流  │         │
+│ }                    │          │ └─┬────────┘         │
+└──┬───┬───┬──────────┘          │   ▼ serve :4096     │
+   │   │   │                     └─────────────────────┘
+   A   B   C                     Machine B (同上)
+                                  Machine C (同上)
+                                  ↑ 推荐：无 session 亲和性问题
+```
+
+推荐 **方案 B（每机独立 nginx）**：
+- Controller 通过 Tailscale 直连部署机 IP
+- 每台机器上的 nginx 只做本地的 TLS + 限流
+- 无需处理 session 亲和性
+- 单机故障不影响其他
+
+**Windows 上的替代方案：**
+
+Windows 可用 IIS ARR（Application Request Routing）或直接使用 nginx Windows 版本。更轻量的做法是用 `opencode serve` 自身的 password 认证 + Tailscale 加密通道（无需本地 TLS），适用于内网环境。
 
 ---
 
