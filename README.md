@@ -1,58 +1,77 @@
-# OpenCode 无人值守与持续对话指南
+# OpenCode 无人值守完整方案
 
-OpenCode 零交互、不间断任务执行的完整配置方案。覆盖权限消除、Session 管理、远程任务分发、心跳监控和 Windows/Linux 双平台部署。
+OpenCode 零交互、不间断任务执行的生产级配置方案。覆盖本地自动化、远程任务分发、安全加固。
 
-## 快速开始
+## 核心理念
 
-```bash
-# 1. 配置全局放行权限
-echo '{"permission": {"*": "allow", "question": "allow", "plan_enter": "allow", "plan_exit": "allow"}}' > opencode.json
+> **如无必要，勿增实体。** 核心只有一件事——把任务发给 `opencode serve`，等它跑完，拿结果。其他所有层按需叠加。
 
-# 2. 非交互执行单次任务（使用 --format json 获取 session_id）
-opencode run --format json "你的任务" 2>/tmp/stderr.log | tee /tmp/events.ndjson
-SESSION_ID=$(head -1 /tmp/events.ndjson | jq -r '.sessionID')
-
-# 3. 多轮持续对话
-opencode run --format json --session "$SESSION_ID" "继续深入..."
-```
-
-## 文档导航
-
-| 文档 | 内容 |
-|------|------|
-| [opencode-unattended-continuous-guide.md](opencode-unattended-continuous-guide.md) | 基础指南：权限配置、Session 管理、CI/CD、坑点规避 |
-| [opencode-remote-dispatch-design.md](opencode-remote-dispatch-design.md) | 远程分发架构：心跳监控、Serve API、Windows+Linux 双平台、完整部署流程 |
-
-## 脚本工具
-
-| 脚本 | 用途 | 平台 |
-|------|------|------|
-| `scripts/run-with-heartbeat.sh` | `opencode run` 包装器，带心跳监控和报告生成 | Linux/macOS |
-| `scripts/heartbeat.sh` | NDJSON 事件流心跳监控，超时告警 | Linux/macOS |
-| `scripts/dispatch.sh` | 远程任务分发控制器（push/status/report/health） | Linux/macOS |
-| `scripts/setup-agent.sh` | 部署机一键安装（systemd 托管） | Linux/macOS |
-| `scripts/setup-agent.ps1` | 部署机一键安装（NSSM/Task Scheduler 托管） | Windows |
-
-## 部署机一键安装
+## 30 秒开始
 
 ```bash
-# Linux 部署机
-curl -sL https://raw.githubusercontent.com/L-ingqin12/opencode-unattended-guide/main/scripts/setup-agent.sh | bash
+# 在目标机（部署机）上
+./otask.sh setup                     # 安装 + 启动 opencode serve
+# 或安全加固版:
+./otask.sh secure                    # Agent 白名单 + 目录沙箱
 
-# Windows 部署机
-powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/L-ingqin12/opencode-unattended-guide/main/scripts/setup-agent.ps1 | iex"
+# 在控制器上
+export OTASK_TARGET=192.168.1.50:4096
+./otask.sh send "分析 /var/log/app/error.log" -d /opt/myapp
+./otask.sh result ses_xxx           # 获取结果
+./otask.sh continue ses_xxx "深入分析错误原因"
 ```
 
-## 架构概览
+## 仓库结构
 
 ```
-Controller (调度机)
-    │
-    ├─ dispatch.sh ──→ 部署机 A (Linux)   ← opencode serve :4096
-    │                 部署机 B (Windows)  ← opencode serve :4096
-    │
-    └─ heartbeat.sh ──→ 本地监控 NDJSON 事件流 / SSE 事件流
+opencode-unattended-guide/
+│
+├── otask.sh                              ★ 核心工具 — 任务生命周期管理
+│                                         (run/send/status/result/continue/setup/secure)
+│
+├── opencode-unattended-continuous-guide.md  # 基础指南
+├── opencode-remote-dispatch-design.md       # 架构设计
+│
+├── config/
+│   ├── secure-opencode.json                 # Agent 白名单 + 目录沙箱
+│   └── agent-security-guide.md              # 三层安全防护
+│
+├── nginx/                                   # 可选：nginx 接入层
+│   ├── opencode-upstream.conf               # rate limit / TLS / SSE
+│   ├── nginx-http-block.conf
+│   └── README.md
+│
+└── scripts/                                 # 可选：辅助脚本
+    ├── setup-agent.sh                       # Linux 一键安装
+    ├── setup-agent.ps1                      # Windows 一键安装
+    ├── heartbeat.sh                         # 心跳监控
+    ├── dispatch.sh                          # 批量分发
+    └── run-with-heartbeat.sh                # run 包装器
 ```
+
+## 从简到繁：按需选取
+
+| 你的场景 | 你需要的东西 |
+|----------|-------------|
+| 单机自动执行任务 | `otask.sh` + `opencode.json` (allow-all) |
+| 多轮持续对话 | `otask.sh continue` |
+| 远程提交到部署机 | `otask.sh` + `opencode serve` on target |
+| 多台部署机 | `otask.sh` + `export OTASK_TARGET=ip:port` |
+| 限制 Agent 暴露面 | `otask.sh secure` → Agent 白名单 + 目录沙箱 |
+| 暴露到外网 | + `nginx/opencode-upstream.conf` (TLS + rate limit) |
+| CI/CD 集成 | `otask.sh run` in GitHub Actions / Jenkins |
+| 多用户隔离 | Docker 每用户独立容器 / 独立端口 |
+| 高安全环境 | + mTLS (nginx ssl_verify_client) + systemd 沙箱 |
+
+## 访问控制三层模型
+
+```
+L1: Nginx (IP 白名单 / rate limit / TLS / mTLS)    ← 网络层
+L2: opencode.json (Agent 白名单 / 路径沙箱 / cmd 白名单) ← 应用层
+L3: 会话隔离 (独立端口 / Docker 容器)                ← 数据层
+```
+
+详见 [config/agent-security-guide.md](config/agent-security-guide.md)
 
 ## 许可
 
