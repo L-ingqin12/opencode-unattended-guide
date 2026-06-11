@@ -1,0 +1,91 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "___comment___": "安全配置模板 — 仅暴露指定 agent，沙箱限定工作目录，禁止危险操作",
+
+  "default_agent": "analyzer",
+
+  "agent": {
+    "___comment___": "只有 mode=primary 的 agent 对外可见。其他用 subagent 或 hidden。",
+
+    "analyzer": {
+      "mode": "primary",
+      "description": "日志与系统分析专家（对外暴露的唯一 agent）",
+      "permission": {
+        "read": {
+          "C:\\ProgramData\\app\\**": "allow",
+          "/var/log/**": "allow",
+          "/etc/**": "allow",
+          "/opt/myapp/**": "allow",
+          "*": "deny"
+        },
+        "edit": {
+          "/opt/opencode-agent/reports/**": "allow",
+          "C:\\opencode-agent\\reports\\**": "allow",
+          "*": "deny"
+        },
+        "bash": {
+          "cat *": "allow",
+          "grep *": "allow",
+          "find *": "allow",
+          "ls *": "allow",
+          "head *": "allow",
+          "tail *": "allow",
+          "wc *": "allow",
+          "sort *": "allow",
+          "awk *": "allow",
+          "jq *": "allow",
+          "df *": "allow",
+          "free *": "allow",
+          "du *": "allow",
+          "ps *": "allow",
+          "systemctl status *": "allow",
+          "Get-Process *": "allow",
+          "Get-Service *": "allow",
+          "Get-EventLog *": "allow",
+          "type *": "allow",
+          "*": "deny"
+        },
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "question": "deny",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "external_directory": "deny"
+      },
+      "prompt": "你是一台部署机上的日志和系统状态分析专家。你只能读取指定目录下的文件，只能执行诊断命令，不能修改系统配置。分析结果写入报告目录。不要进入计划模式，不要提问，自己决策。"
+    },
+
+    "builder": {
+      "mode": "hidden",
+      "description": "代码构建 agent（内部使用，不对外暴露）",
+      "permission": "allow"
+    },
+
+    "deployer": {
+      "mode": "hidden",
+      "description": "部署 agent（内部使用，不对外暴露）",
+      "permission": "allow"
+    }
+  },
+
+  "permission": {
+    "___comment___": "全局兜底：所有未在 agent 中明确定义的权限默认 deny",
+    "*": "deny",
+    "doom_loop": "deny"
+  },
+
+  "___paths_note___": {
+    "linux": {
+      "log_dirs": "/var/log/app, /opt/myapp/logs",
+      "config_dirs": "/etc/myapp, /opt/myapp/config",
+      "report_dir": "/opt/opencode-agent/reports"
+    },
+    "windows": {
+      "log_dirs": "C:\\ProgramData\\app\\logs, C:\\myapp\\logs",
+      "config_dirs": "C:\\ProgramData\\app\\config, C:\\myapp\\config",
+      "report_dir": "C:\\opencode-agent\\reports"
+    }
+  }
+}
