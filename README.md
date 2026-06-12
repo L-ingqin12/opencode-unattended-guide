@@ -36,10 +36,13 @@ opencode-unattended-guide/
 │
 ├── otask.sh / otask.ps1                ★ 核心工具 — 跨平台任务生命周期
 │                                         run send status result continue abort setup secure
+├── otask-chat.sh                       ★ 多轮对话引擎
+│                                         chain interactive auto (预编排/交互/自动化)
 │
 ├── opencode-unattended-continuous-guide.md  # 基础指南 (权限/Session/CI)
 ├── opencode-remote-dispatch-design.md       # 架构设计 (serve/nginx/安全通道)
 ├── opencode-practical-patterns.md           # 实操专题 (web vs serve / 大文件 / URL)
+├── opencode-conversation-design.md          # 多轮对话策略 (状态机/结果检测/恢复)
 │
 ├── tasks/                                   # 任务模板（开箱即用）
 │   ├── log-analysis.md                      # 日志错误分析
